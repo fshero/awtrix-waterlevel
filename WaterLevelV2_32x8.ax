@@ -1,0 +1,306 @@
+# @version 1.5.0
+# @display 32x8
+# @config topic text "MQTT Topic" default=""
+# @config speed number "Bubble Speed (1-10)" default=3 min=1 max=10
+# @config text_shadow select "Text Shadow" default=yes options=no,yes
+# @config hide_full select "Hide when Full (100%)" default=no options=no,yes
+
+import math
+import json
+
+class WaterLevel
+  var current_topic
+  var level
+  var bubbles
+
+  def init()
+    self.current_topic = nil
+    self.level = nil
+
+    # Luftbläschen mit gestaffeltem Startzyklus: [base_x, y_float, speed_factor, wobble_phase]
+    # Gestaffelte Y-Werte über die volle Displayhöhe (8px) verhindern gleichzeitiges Spawnen
+    self.bubbles = [
+      [5.0,  7.0,  0.8, 0.0],
+      [11.0, 8.6,  1.0, 1.5],
+      [17.0, 10.2, 0.9, 3.1],
+      [22.0, 11.8, 1.1, 4.4],
+      [27.0, 13.4, 0.8, 2.0]
+    ]
+  end
+
+  def get_topic()
+    var t = nil
+    try
+      if store.get("topic") != nil
+        var val = str(store.get("topic"))
+        if size(val) > 0
+          t = val
+        end
+      end
+    except ..
+    end
+    return t
+  end
+
+  def setup()
+    self.current_topic = self.get_topic()
+    if self.current_topic != nil && size(self.current_topic) > 0
+      mqtt.subscribe(self.current_topic, / topic, payload -> self.on_mqtt(payload))
+    end
+  end
+
+  def should_hide()
+    try
+      if store.get("hide_full") != nil
+        var h = store.get("hide_full")
+        var cfg_hide = (h == "yes" || h == "Yes" || h == "true" || h == true || h == 1 || h == "1")
+        if cfg_hide && self.level != nil && (self.level >= 100.0 || int(self.level) >= 100)
+          return true
+        end
+      end
+    except ..
+    end
+    return false
+  end
+
+  def should_show()
+    return !self.should_hide()
+  end
+
+  def on_mqtt(payload)
+    var val = nil
+    try
+      var data = json.load(str(payload))
+      if type(data) == 'map'
+        if data.contains('percent')    val = real(data['percent'])
+        elif data.contains('level')    val = real(data['level'])
+        elif data.contains('value')    val = real(data['value'])
+        elif data.contains('val')      val = real(data['val'])
+        end
+      else
+        val = real(data)
+      end
+    except ..
+      try
+        val = real(payload)
+      except ..
+      end
+    end
+
+    if val != nil
+      if val < 0.0   val = 0.0   end
+      if val > 100.0 val = 100.0 end
+      self.level = val
+    end
+  end
+
+  # Hilfsfunktion: Dimmt eine Farbe um einen Faktor ab
+  def dim_color(c, factor)
+    var r = int(((c >> 16) & 0xFF) * factor)
+    var g = int(((c >> 8) & 0xFF) * factor)
+    var b = int((c & 0xFF) * factor)
+    return (r << 16) | (g << 8) | b
+  end
+
+  # Hilfsfunktion: Mischt zwei Farben stufenlos (Subpixel-Anti-Aliasing)
+  def blend_colors(c_bg, c_fg, alpha)
+    if alpha <= 0.0 return c_bg end
+    if alpha >= 1.0 return c_fg end
+    var r0 = (c_bg >> 16) & 0xFF
+    var g0 = (c_bg >> 8) & 0xFF
+    var b0 = c_bg & 0xFF
+    var r1 = (c_fg >> 16) & 0xFF
+    var g1 = (c_fg >> 8) & 0xFF
+    var b1 = c_fg & 0xFF
+    var r = int(r0 + (r1 - r0) * alpha)
+    var g = int(g0 + (g1 - g0) * alpha)
+    var b = int(b0 + (b1 - b0) * alpha)
+    return (r << 16) | (g << 8) | b
+  end
+
+  # Berechnet den Abblend-Gradienten basierend auf der Distanz zum Text-Rahmen
+  def get_shadow_factor(x, y, bx0, by0, bx1, by1)
+    var dx = 0
+    if x < bx0
+      dx = bx0 - x
+    elif x > bx1
+      dx = x - bx1
+    end
+
+    var dy = 0
+    if y < by0
+      dy = by0 - y
+    elif y > by1
+      dy = y - by1
+    end
+
+    var d2 = dx * dx + dy * dy
+    if d2 == 0
+      return 0.20  # Direkt hinter Text: ~80% dunkler
+    elif d2 <= 1
+      return 0.45  # 1 Pixel Abstand: ~55% dunkler
+    elif d2 <= 4
+      return 0.75  # 2 Pixel Abstand: ~25% dunkler
+    else
+      return 1.0   # Volle Originalfarbe
+    end
+  end
+
+  # Berechnet die Hintergrundfarbe des Wassers für eine bestimmte Koordinate
+  def get_water_color(x, y, base_y, height, bx0, by0, bx1, by1, cfg_shadow)
+    if y < base_y || y >= height return 0x000000 end
+    var is_surface = (y == base_y)
+    var c = is_surface ? 0x4DD0E1 : 0x0288D1
+
+    if cfg_shadow && (x >= (bx0 - 2)) && (x <= (bx1 + 2)) && (y >= (by0 - 1)) && (y <= (by1 + 1))
+      var factor = self.get_shadow_factor(x, y, bx0, by0, bx1, by1)
+      if factor < 1.0
+        if is_surface
+          c = self.dim_color(c, 0.70 + (factor * 0.30))
+        else
+          c = self.dim_color(c, factor)
+        end
+      end
+    end
+    return c
+  end
+
+  def draw()
+    var width = 32
+    var height = 8
+
+    # Konfigurationswerte aus dem AWTRIX Store laden
+    var cfg_speed = 3
+    var cfg_shadow = true
+
+    try
+      if store.get("speed") != nil
+        cfg_speed = int(store.get("speed"))
+      end
+      if store.get("text_shadow") != nil
+        var s = store.get("text_shadow")
+        cfg_shadow = (s == "yes" || s == "Yes" || s == "true" || s == true || s == 1 || s == "1")
+      end
+    except ..
+    end
+
+    # MQTT-Topic Wechsel im laufenden Betrieb
+    var active_topic = self.get_topic()
+    if self.current_topic != active_topic
+      if self.current_topic != nil && size(self.current_topic) > 0
+        try
+          mqtt.unsubscribe(self.current_topic)
+        except ..
+        end
+      end
+      self.current_topic = active_topic
+      if self.current_topic != nil && size(self.current_topic) > 0
+        mqtt.subscribe(self.current_topic, / topic, payload -> self.on_mqtt(payload))
+      end
+    end
+
+    clear()
+
+    if self.should_hide()
+      try
+        rotation.next()
+      except ..
+      end
+      return
+    end
+
+    var has_data = (self.level != nil)
+    var fill = has_data ? self.level : 25.0
+    var water_height_px = int((fill / 100.0) * height)
+    if !has_data && water_height_px < 2
+      water_height_px = 2
+    end
+    var base_y = height - water_height_px
+
+    # Text in normaler Größe berechnen und mittig zentrieren
+    var txt = has_data ? (str(int(self.level)) + "%") : "--%"
+    var col = has_data ? 0xFFFFFF : 0xFFA726
+
+    var w = 0
+    try
+      w = text_width(txt)
+    except ..
+      w = size(txt) * 4
+    end
+
+    var pos_x = int((width - w) / 2)
+    var pos_y = 6  # Baseline für Standardfont auf 32x8 (Höhe 1..6 vertikal zentriert)
+
+    var bx0 = pos_x
+    var bx1 = pos_x + w - 1
+    var by0 = 1
+    var by1 = 6
+
+    # 1. Ruhige Wasserfläche
+    if base_y < height
+      for x: 0 .. (width - 1)
+        for y: base_y .. (height - 1)
+          pixel(x, y, self.get_water_color(x, y, base_y, height, bx0, by0, bx1, by1, cfg_shadow))
+        end
+      end
+    end
+
+    # 2. Aufsteigende Luftbläschen mit konstanter Zyklusdauer (unabhängig vom Wasserstand)
+    var speed_factor = 0.05 + (real(cfg_speed) * 0.02)
+    for b: self.bubbles
+      b[1] = b[1] - (b[2] * speed_factor)
+
+      # Beim Erreichen der Oberfläche: Fester Zyklusabstand (height = 8),
+      # damit die Frequenz und Blasenzahl bei niedrigem Wasserstand exakt gleich bleibt!
+      if b[1] <= real(base_y)
+        b[1] = real(base_y + height) + (real(int(math.rand() % 15)) * 0.1)
+        b[0] = real(int(math.rand() % (width - 4)) + 2)
+        b[3] = real(int(math.rand() % 628)) * 0.01
+      end
+
+      # Bläschen nur rendern, wenn es sich im Wasser (zwischen Boden und Oberfläche) befindet
+      if b[1] >= real(base_y) && b[1] < real(height)
+        var cur_bx = int(b[0] + math.sin(b[1] * 1.5 + b[3]) * 0.5 + 0.5)
+        if cur_bx < 1 cur_bx = 1 end
+        if cur_bx >= (width - 1) cur_bx = width - 2 end
+
+        var y0 = int(b[1])
+        var frac = b[1] - real(y0)
+
+        # Subpixel-Rendering: Obere Zeile (y0)
+        if y0 >= base_y && y0 < height
+          var bg0 = self.get_water_color(cur_bx, y0, base_y, height, bx0, by0, bx1, by1, cfg_shadow)
+          var b_col0 = 0xE0F7FA
+          if cfg_shadow && cur_bx >= (bx0 - 2) && cur_bx <= (bx1 + 2) && y0 >= (by0 - 1) && y0 <= (by1 + 1)
+            var factor = self.get_shadow_factor(cur_bx, y0, bx0, by0, bx1, by1)
+            if factor < 1.0
+              b_col0 = self.dim_color(b_col0, 0.50 + (factor * 0.50))
+            end
+          end
+          var col0 = self.blend_colors(bg0, b_col0, 1.0 - frac)
+          pixel(cur_bx, y0, col0)
+        end
+
+        # Subpixel-Rendering: Untere Zeile (y1)
+        var y1 = y0 + 1
+        if y1 >= base_y && y1 < height && frac > 0.04
+          var bg1 = self.get_water_color(cur_bx, y1, base_y, height, bx0, by0, bx1, by1, cfg_shadow)
+          var b_col1 = 0xE0F7FA
+          if cfg_shadow && cur_bx >= (bx0 - 2) && cur_bx <= (bx1 + 2) && y1 >= (by0 - 1) && y1 <= (by1 + 1)
+            var factor = self.get_shadow_factor(cur_bx, y1, bx0, by0, bx1, by1)
+            if factor < 1.0
+              b_col1 = self.dim_color(b_col1, 0.50 + (factor * 0.50))
+            end
+          end
+          var col1 = self.blend_colors(bg1, b_col1, frac)
+          pixel(cur_bx, y1, col1)
+        end
+      end
+    end
+
+    # 3. Textdarstellung (Standardgröße, immer zentriert)
+    text(pos_x, pos_y, txt, col)
+  end
+end
+
+return WaterLevel()

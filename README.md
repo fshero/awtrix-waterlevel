@@ -1,4 +1,4 @@
-# 🌊 AWTRIX WaterLevel App
+# AWTRIX WaterLevel App
 
 [![Release](https://img.shields.io/badge/version-v1.5.0-blue.svg)](https://github.com/fshero/awtrix-waterlevel/releases/tag/v1.5.0)
 [![AWTRIX](https://img.shields.io/badge/platform-AWTRIX%20Light%20%2F%20NG-brightgreen.svg)](https://github.com/Blueforcer/awtrix-ng)
@@ -11,7 +11,7 @@ Connects to your local smart home setup via **MQTT** to display the current fill
 
 ---
 
-## 📸 Visual Showcase & Demos
+## Visual Showcase & Demos
 
 ### 52×16 Matrix (Ulanzi TC002 / DIY Displays)
 
@@ -35,7 +35,7 @@ Tailored specifically for the 8-pixel height of the Ulanzi TC001, featuring a ca
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 - **Dynamic Liquid Animation:** Real-time water level visualization (0–100%) mapped accurately to matrix height.
 - **Silky Smooth Subpixel Bubbles:** Continuous vertical subpixel anti-aliasing (`blend_colors`) ensures air bubbles glide upwards smoothly without discrete pixel jumps.
@@ -49,7 +49,7 @@ Tailored specifically for the 8-pixel height of the Ulanzi TC001, featuring a ca
 
 ---
 
-## 🎛️ Matrix Variants & Hardware
+## Matrix Variants & Hardware
 
 | File | Target Matrix | Recommended Hardware | Highlights |
 | :--- | :--- | :--- | :--- |
@@ -58,7 +58,7 @@ Tailored specifically for the 8-pixel height of the Ulanzi TC001, featuring a ca
 
 ---
 
-## 🚀 Installation
+## Installation
 
 1. Download the app script matching your display size from the [Releases](https://github.com/fshero/awtrix-waterlevel/releases) page or repository root:
    - For **Ulanzi TC002 / 52×16**: `WaterLevelV2_52x16.ax`
@@ -70,9 +70,9 @@ Tailored specifically for the 8-pixel height of the Ulanzi TC001, featuring a ca
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-Open your AWTRIX web interface, navigate to the **Apps** tab, and click the **Gear (⚙️) icon** next to **WaterLevel** to configure settings:
+Open your AWTRIX web interface, navigate to the **Apps** tab, and click the **gear icon** next to **WaterLevel** to configure settings:
 
 ### 52×16 Variant (`WaterLevelV2_52x16.ax`)
 
@@ -97,7 +97,7 @@ Open your AWTRIX web interface, navigate to the **Apps** tab, and click the **Ge
 
 ---
 
-## 📡 Smart Home & MQTT Integration
+## Smart Home & MQTT Integration
 
 The app automatically parses incoming MQTT payloads. Point the app to your topic and publish the fill level percentage (`0` to `100`).
 
@@ -143,12 +143,12 @@ automation:
 
 ---
 
-## 📝 Changelog
+## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for full release notes and version history.
 
 ---
 
-## 📄 License
+## License
 
 This project is open-source software licensed under the [MIT License](LICENSE).
